@@ -18,4 +18,10 @@ Services List:
 - Chronograf    -> chronograf:latest
 - Jaeger        -> jaegertracing/all-in-one:latest
 
+
+## NOTE: Install Docker Loki Driver BEFORE composing the stack with the following command:
+```
+docker plugin install grafana/loki-docker-driver:latest --alias loki-driver --grant-all-permissions
+```
+
 Feel free to use it and contribute.
