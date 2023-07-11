@@ -1,5 +1,5 @@
 #! /bin/bash
-echo "VCOE Composer Deploy"
+echo "Composer Deploy"
 
 docker-compose -f ./docker-compose.yml up -d
 
