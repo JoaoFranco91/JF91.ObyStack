@@ -1,0 +1,278 @@
+version: '3.3'
+
+services:
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    networks:
+      loki: null
+      influxdb: null
+    ports:
+    - protocol: tcp
+      published: 3000
+      target: 3000
+    depends_on:
+      - influxdb
+    # See: https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/#override-configuration-with-environment-variables
+    environment:
+      - GF_LOG_MODE=console file
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=true
+      - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=true
+    volumes:
+      - ./grafana/data:/var/lib/grafana
+      - ./grafana/config/provisioning:/etc/grafana/provisioning
+      - ./grafana/logs:/var/log/grafana
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    networks:
+      loki: null
+      influxdb: null
+    ports:
+    - published: 9090
+      target: 9090
+    command:
+    - --config.file=/etc/prometheus/prometheus.yml
+    - --storage.tsdb.path=/prometheus
+    - --web.enable-admin-api
+    - --web.enable-lifecycle
+    volumes:
+    - ./prometheus/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    - ./prometheus/config/targets.json:/etc/prometheus/targets.json:ro
+
+  # Loki
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    restart: unless-stopped
+    networks:
+      loki: null
+      influxdb: null
+    ports:
+    - protocol: tcp
+      published: 3100
+      target: 3100
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+    - ./loki/config/loki-config.yml:/etc/loki/loki-config.yml:ro
+
+  # Promtail
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    restart: unless-stopped
+    networks:
+      loki: null
+      influxdb: null
+    ports:
+    - protocol: tcp
+      published: 1514
+      target: 1514
+    - protocol: tcp
+      published: 9080
+      target: 9080
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+    - ./promtail/config/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+
+  # Syslog NG
+  syslog-ng:
+    image: balabit/syslog-ng:latest
+    container_name: syslog-ng
+    restart: unless-stopped
+    networks:
+      loki: null
+      influxdb: null
+    ports:
+    - protocol: udp
+      published: 514
+      target: 514
+    - protocol: tcp
+      published: 601
+      target: 601
+    depends_on:
+    - promtail
+    command: -edv
+    volumes:
+    - ./syslog-ng/config/syslog-ng.conf:/etc/syslog-ng/syslog-ng.conf:ro
+
+  # Node Exporter
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    networks:
+      loki: null
+      influxdb: null
+    ports:
+    - published: 9100
+      target: 9100
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+
+  # SNMP Exporter
+  snmp-exporter:
+    image: prom/snmp-exporter:latest
+    container_name: snmp-exporter
+    restart: unless-stopped
+    ports:
+    - published: 9116
+      target: 9116
+    command:
+      - '--config.file=/config/snmp.yml'
+      - '--log.level=debug'
+    volumes:
+    - ./snmp-exporter/config:/config
+
+  # Cadvisor
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    restart: unless-stopped
+    networks:
+      loki: null
+      influxdb: null
+    ports:
+    - published: 8080
+      target: 8080
+    privileged: true
+    devices:
+    - /dev/kmsg:/dev/kmsg
+    volumes:
+    - /:/rootfs:ro
+    - /var/run:/var/run:rw
+    - /var/run/docker.sock:/var/run/docker.sock:rw
+    - /sys:/sys:ro
+    - /var/lib/docker:/var/lib/docker:ro
+    - /dev/disk/:/dev/disk:ro
+
+  # InfluxDB2
+  influxdb:
+    image: influxdb:2.7.1
+    container_name: influxdb
+    restart: on-failure:10
+    networks:
+      influxdb: null
+    ports:
+      - ${DOCKER_INFLUXDB_INIT_PORT}:8086
+    entrypoint: ["./entrypoint.sh"]
+    env_file:
+      - .env
+    volumes:
+      - influxdb-storage:/var/lib/influxdb2:rw
+
+  # InfluxDB CLI
+  influxdb_cli:
+    image: quay.io/influxdb/influxdb:v2.0.4
+    container_name: influxdb_cli
+    restart: on-failure
+    networks:
+      influxdb: null
+    depends_on:
+      - influxdb
+    links:
+      - influxdb
+    entrypoint: influx bucket create --skip-verify --name telegraf --retention 30d --org metrics --host http://influxdb:8086 --token changeme
+
+  # Telegraf
+  telegraf:
+    image: telegraf:1.27.1
+    container_name: telegraf
+    restart: unless-stopped
+    networks:
+      influxdb: null
+    depends_on:
+      - influxdb
+    env_file:
+      - .env
+    volumes:
+      - ${TELEGRAF_CFG_PATH}:/etc/telegraf/telegraf.conf:rw
+    
+  # Kapacitator
+  kapacitor:
+    image: kapacitor:1.6.6
+    container_name: kapacitor
+    restart: unless-stopped
+    networks:
+      influxdb: null
+    ports:
+      - "9092:9092"
+    depends_on:
+      - influxdb
+    links:
+      - influxdb
+    environment:
+      KAPACITOR_HOSTNAME: kapacitor
+      KAPACITOR_INFLUXDB_0_URLS_0: http://influxdb:8086
+    volumes:
+      - ./kapacitor/config/kapacitor.conf:/etc/kapacitor/kapacitor.conf:ro
+      - ./kapacitor/kapacitor:/var/lib/kapacitor:rw
+
+  # Chronograf
+  chronograf:
+    image: chronograf:latest
+    container_name: chronograf
+    restart: unless-stopped
+    networks:
+      influxdb: null
+    ports:
+      - 8888:8888
+    depends_on:
+      - influxdb
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_ORG=${DOCKER_INFLUXDB_INIT_ORG}
+      - INFLUXDB_TOKEN=${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}
+      - KAPACITOR_URL=http://kapacitor:9092
+      - KAPACITOR_USERNAME=${DOCKER_INFLUXDB_INIT_USERNAME}
+      - KAPACITOR_PASSWORD=${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}
+    volumes:
+    - chronograf-storage:/var/lib/chronograf
+    
+  # Jaeger
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    restart: unless-stopped
+    ports:
+      - "14250:14250"
+      - "16686:16686"
+      - "14268:14268"
+      - "5775:5775/udp"
+      - "5778:5778"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+    networks:
+      loki: null
+      influxdb: null
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - LOG_LEVEL=debug
+    logging:
+      driver: loki-driver
+      options:
+        loki-url: 'http://loki:3100/loki/api/v1/push'
+
+# Volumes
+volumes:
+  influxdb-storage:
+  chronograf-storage:
+
+# Networks
+networks:
+  loki: {}
+  influxdb: {}
