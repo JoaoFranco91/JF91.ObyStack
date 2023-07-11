@@ -40,15 +40,9 @@ scrape_configs:
   - job_name: 'caadvisor'
     static_configs:
     - targets: ['cadvisor:8080']
-
-  # - job_name: 'jf91portfolioapi'
-  #   static_configs:
-  #   - targets: ['192.168.1.91:9191']
-  #   metrics_path: /metrics-text
   
   - job_name: 'file_discovery'
     file_sd_configs:
     - files:
       - targets.json
-  #  metrics_path: /metrics-text
 
