@@ -186,7 +186,7 @@ services:
       - influxdb
     links:
       - influxdb
-    entrypoint: influx bucket create --skip-verify --name telegraf --retention 30d --org metrics --host http://influxdb:8086 --token changeme
+    entrypoint: influx bucket create --skip-verify --name telegraf --retention ${DOCKER_INFLUXDB_INIT_RETENTION} --org ${DOCKER_INFLUXDB_INIT_ORG} --host http://influxdb:8086 --token ${DOCKER_INFLUXDB_INIT_ADMIN_TOKEN}
 
   # Telegraf
   telegraf:
